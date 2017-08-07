@@ -1,0 +1,819 @@
+﻿<!DOCTYPE html>
+<html >
+
+<head>
+  <meta charset="UTF-8">
+  <link rel="shortcut icon" type="image/x-icon" href="https://production-assets.codepen.io/assets/favicon/favicon-8ea04875e70c4b0bb41da869e81236e54394d63638a1ef12fa558a4a835f1164.ico" />
+  <link rel="mask-icon" type="" href="https://production-assets.codepen.io/assets/favicon/logo-pin-f2d2b6d2c61838f7e76325261b7195c27224080bc099486ddd6dccb469b8e8e6.svg" color="#111" />
+  <title>CodePen - Earthquakes App</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  
+  
+  <link rel='stylesheet prefetch' href='https://cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/3.3.7/css/bootstrap.min.css'>
+
+      <style>
+      body {
+  margin: 0;
+  overflow: hidden;
+  font-family: consolas;
+  background: #fff;
+}
+
+aside {
+  position: fixed;
+  width: 300px;
+  background: rgba(0, 0, 0, 0.7);
+}
+@media (max-width: 480px) {
+  aside {
+    display: none;
+  }
+}
+
+#log {
+  position: fixed;
+  bottom: 10px;
+  left: 10px;
+  font-family: courier;
+  color: #222;
+  width: 100%;
+}
+
+.form {
+  padding: 10px;
+  z-index: 10;
+  width: 100%;
+  color: white;
+}
+.form label {
+  font-size: 11px;
+  color: white;
+}
+.form input {
+  font-family: courier;
+  background: rgba(255, 255, 255, 0.3);
+  border: 0;
+  color: white;
+  width: 100%;
+}
+
+canvas {
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.author {
+  position: fixed;
+  right: 10px;
+  top: 10px;
+  z-index: 100;
+  opacity: .8;
+}
+
+    </style>
+
+  
+  
+  
+  
+</head>
+
+<body translate="no" >
+
+  
+<section ng-app="app">
+  <div id="log">{{ log }} </div>
+  <aside>
+    <form class="form form-horizontal" ng-controller="formController">
+      <!---->
+      <!-- | {{ query }}-->
+      <div class="form-group hidden">
+        <label class="col-sm-4 control-label">Query</label>
+        <div class="col-sm-8">
+          <textarea class="form-control" ng-bind="query" rows="4"></textarea>
+        </div>
+      </div>
+      <!---->
+      <div class="form-group" ng-repeat="param in params" ng-if="param.public">
+        <label class="col-sm-4 control-label">{{param.name}}</label>
+        <div class="col-sm-8">
+          <input class="input-sm form-control" ng-attr-type="{{param.type || 'text'}}" ng-model="param.val" value="param.val" step=".1"/>
+        </div>
+      </div>
+      <hr/>
+      <div class="form-group">
+        <label class="col-sm-4 control-label">Hypocenters size: {{fix.hypoSize}}</label>
+        <div class="col-sm-8">
+          <input class="input-sm form-control" type="range" ng-model="fix.hypoSize" value="fix.hypoSize" min="0.1" max="20" step="0.1" ng-change="hypoSize()"/>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="col-sm-4 control-label">Magnitude size: {{fix.magSize}}</label>
+        <div class="col-sm-8">
+          <input class="input-sm form-control" type="range" ng-model="fix.magSize" value="fix.magSize" min="0.025" max="30" step="0.1" ng-change="magSize()"/>
+        </div>
+      </div>
+      <!---->
+      <div class="form-group">
+        <div class="col-sm-12">
+          <div class="btn-group-vertical btn-block">
+            <button class="btn btn-info" ng-click="loadFeed()"> <span class="glyphicon glyphicon-refresh pull-left"></span> Load RSS feed</button>
+            <!--button.btn.btn-default(ng-click="addLocations()") Add locations-->
+            <!--
+            button.btn.btn-default(ng-click="addHypo()")
+              span.glyphicon.glyphicon-map-marker.pull-left
+              |  Show hypocenters 
+            -->
+            <button class="btn btn-default" ng-click="addMagSphere()"> <span class="glyphicon glyphicon-star pull-left"></span> Show magnitude sphere    </button>
+            <!--  
+            button.btn.btn-default(ng-click="addMagText()") 
+              span.glyphicon.glyphicon-font.pull-left
+              |  Show magnitude text
+            -->
+          </div>
+        </div>
+      </div>
+      <!-- 
+      .form-group
+        label.col-sm-4.control-label Size
+        .col-sm-8
+          input.input-sm.form-control(type="range" ng-model="param.val" value="param.val")
+          
+      -->
+    </form>
+  </aside>
+</section>
+<!--.author Alessandro Falchi 2016-->
+  
+  <script src='https://cdnjs.cloudflare.com/ajax/libs/jquery/3.1.0/jquery.min.js'></script>
+<script src='https://cdnjs.cloudflare.com/ajax/libs/angular.js/1.5.8/angular.min.js'></script>
+<script src='https://cdnjs.cloudflare.com/ajax/libs/three.js/r77/three.min.js'></script>
+<script src='https://threejs.org/examples/js/controls/OrbitControls.js'></script>
+
+    <script>
+    'use strict';
+
+console.clear();
+
+const app = angular.module('app', [])
+
+.run(function($rootScope, $log, params, loadFeed, QUERYBASE, log, points, locations, threeService, fix) {
+
+  var vm = $rootScope;
+  vm.log = 'init';
+  vm.points = points;
+  vm.params = params; 
+  vm.query = ''; 
+  vm.fix = {
+    hypoSize: 1,
+    magSize: 1
+  }
+  
+  vm.makeQuery = function() {
+    var query = '';
+    for (let i=0; i<vm.params.length; i++) {
+      query += vm.params[i].name + '=' + vm.params[i].val + '&';
+    }
+    vm.query = QUERYBASE + query;
+  }; 
+  
+  vm.loadFeed = function() {
+    vm.makeQuery();
+    threeService.clearScene();
+    console.log(vm.query);
+    loadFeed(vm.query);
+  };
+  
+  vm.addLocations = function() {
+    for (let i = 0; i < locations.length; i++) {
+      threeService.makeLoc(fix.lon(locations[i].lon), fix.depth(locations[i].depth), fix.lat(locations[i].lat), .05, locations[i].color);
+      threeService.makeText(locations[i].name, fix.lon(locations[i].lon), fix.lat(locations[i].lat) );      
+      
+      
+    }
+  };
+  
+  vm.addMagSphere = function() {
+    for (let i = 0; i < vm.points.length; i++) {
+      threeService.makeMagPoint(fix.lon(vm.points[i].lon), fix.depth(vm.points[i].depth), fix.lat(vm.points[i].lat), fix.mag(vm.points[i].mag), vm.points[i].color);      
+      $rootScope.log = 'Adding element ' + i + ' of ' + (vm.points.length-1);
+    }
+  };
+  
+  vm.addMagText = function() {
+    for (let i = 0; i < vm.points.length; i++) {
+      threeService.makeText(vm.points[i].mag, fix.lon(vm.points[i].lon), fix.lat(vm.points[i].lat), fix.depth(vm.points[i].depth), .05 );            
+      // $rootScope.log = 'Adding element ' + i + ' of ' + (vm.points.length-1);
+    }
+  };
+
+  vm.addHypo = function() {  
+    for (let i = 0; i < vm.points.length; i++) {      
+      threeService.makeHypo(fix.lon(vm.points[i].lon), fix.depth(vm.points[i].depth), fix.lat(vm.points[i].lat), .02, vm.points[i].color);
+      
+      // $log.log(vm.points[i]);
+          
+      
+      $rootScope.log = 'Adding element ' + (i+1) + ' of ' + (vm.points.length); 
+    }
+  };
+  
+  
+  
+  
+  vm.hypoSize = function() { 
+    threeService.hypoSize(vm.fix.hypoSize);
+  };
+  
+  vm.magSize = function() { 
+    threeService.magSize(vm.fix.magSize);
+  };
+  
+  vm.makeQuery();
+  vm.loadFeed();
+  threeService.init();
+  vm.addLocations();
+
+})
+
+.controller('formController', function($rootScope, $scope, params) {
+  var vm = $scope;
+  vm.params = $rootScope.params;
+  
+  console.log( params === $rootScope.params );
+  
+})
+
+.constant('QUERYBASE', 'http://webservices.rm.ingv.it/fdsnws/event/1/query?')
+
+.value('points', [])
+
+.value('locations', [
+  {"color":0xffff00, "depth":-855, "lat":42.8599846,"lon":13.2398447,"mag":2.5,"name":"Accumoli"},
+  {"color":0xffff00,"depth":0,"lat":42.6291248,"lon":13.2882622,"mag":2.5,"name":"Amatrice"},
+  {"color":0xffff00,"depth":-16,"lat": 43.616667,"lon": 13.516667,"mag":2.5,"name":"Ancona"},
+  {"color":0xffff00,"depth":-16,"lat": 43.360175,"lon": 13.3420585,"mag":2.5,"name":"Appignano"},
+  {"color":0xffff00,"depth":-661,"lat": 43.131819,"lon": 13.063831,"mag":2.5,"name":"Camerino"}, 
+  {"color":0xffff00,"depth":-1452,"lat": 42.828889,"lon": 13.205833,"mag":2.5,"name":"Castelluccio"}, 
+  {"color":0xffff00,"depth":-1452,"lat": 43.843531,"lon": 13.019756,"mag":2.5,"name":"Fano"}, 
+  {"color":0xffff00,"depth":-1452,"lat": 40.833333,"lon": 14.25,"mag":2.5,"name":"Napoli"},
+  {"color":0xffff00,"depth":-493,"lat": 43.1121,"lon": 12.3888,"mag":2.5,"name":"Perugia"},
+  {"color":0xffff00,"depth":-4,"lat": 42.464278,"lon": 14.214189,"mag":2.5,"name":"Pescara"},
+  {"color":0xffff00,"depth":-341,"lat":43.267775,"lon":13.348139,"mag":2.5,"name":"Pollenza"},
+  {"color":0xffff00,"depth":-236,"lat":43.228856,"lon":13.177103,"mag":2.5,"name":"San Severino"},
+  {"color":0xffff00,"depth":-236,"lat":42.733333,"lon": 12.73333,"mag":2.5,"name":"Spoleto"},
+  {"color":0xffff00,"depth":0,"lat":41.893056,"lon":12.482778,"mag":2.5,"name":"Roma"},
+  {"color":0xffff00,"depth":0,"lat":45.464161,"lon":9.190336,"mag":2.5,"name":"Milano"},
+  {"color":0xffff00,"depth":0,"lat":43.8998441,"lon":12.8769851,"mag":2.5,"name":"Pesaro"},
+  {"color":0xffff00,"depth":0,"lat":43.30675,"lon":13.7286,"mag":2.5,"name":"Civitanova Marche"},
+  {"color":0xffff00,"depth":0,"lat":42.3493916,"lon":13.3983832,"mag":2.5,"name":"L'Aquila"},
+  {"color":0xffff00,"depth":-744, "lat":42.944131,"lon":13.14295,"mag":2.5,"name":"Ussita"} 
+])
+  
+.value('params', [
+  {
+    name: 'starttime',
+    val: '2017-01-17T00:00:00',
+    type: 'text',
+    public: true
+  },
+  {
+    name: 'orderby',
+    val: 'time-asc',
+    type: 'text',
+    public: false
+  },
+  {
+    name: 'endtime',
+    val: '2017-03-31T00:00:00',
+    type: 'text',
+    public: true
+  }, 
+  {
+    name: 'limit',
+    val: 1000, 
+    type: 'number',
+    min: 1,
+    max: 1000,
+    step: 10,
+    public: true
+  }, {
+    name: 'minmag',
+    val: 3.5,
+    type: 'number',
+    min: 0.5,
+    max: 9,
+    step: 0.5,
+    public: true
+  }, {
+    name: 'maxmag',
+    val: 7,    
+    type: 'number',
+    min: 1,
+    max: 10,
+    step: 0.5,
+    public: true
+  },
+  {
+    name: 'minlat',
+    val: 40,
+    public: false
+  }, {
+    name: 'maxlat',
+    val: 45,
+    public: false
+  }, {
+    name: 'minlon',
+    val: 9,
+    public: false
+  }, {
+    name: 'maxlon',
+    val: 14,
+    public: false
+  }
+])
+
+.service('log', function() {
+  return function(msg) {
+    return msg;
+  };
+})
+
+.service('firebaseDB', function() {
+  // return new Firebase("https://m1sc.firebaseio.com/quake");
+})
+
+
+/*-------------------------------------------
+FEED LOADER
+-------------------------------------------*/
+.service('loadFeed', function(log, $http, points, firebaseDB, threeService, $rootScope) {
+  return function(query) {
+    
+    $rootScope.log = 'Loading data...';   
+       
+    $http({
+      method: 'GET',
+      // url: 'https://m1sc.firebaseio.com/quake.json',
+      url: query
+    }).then(function successCallback(response) {      
+      
+      $rootScope.points = [];
+      
+      $(response.data).find('event').each(function(i, e) {
+        var p = {
+          region: $('description text', e).text(),
+          date: $('creationInfo creationTime', e).text(),
+          lat: parseFloat($('origin latitude value', e).text()), 
+          lon: parseFloat($('origin longitude value', e).text()),
+          depth: parseFloat($('origin depth value', e).text()),
+          mag: parseFloat($('magnitude mag value', e).text())
+        };
+        //console.log(p.date);
+        $rootScope.points.push(p);        
+      });
+
+      // firebaseDB.child('data').set(points);
+      $rootScope.log = 'Data loaded';
+      $rootScope.addHypo();
+      //$rootScope.addMagSphere();
+
+    }, function errorCallback(response) {
+      
+      $rootScope.log = 'Error loading data';
+      
+      // called asynchronously if an error occurs
+      // or server returns response with an error status.
+      console.log('Error loading data, loading Firebase fallback');
+
+      /*
+      firebaseDB.on('value', function(snapshot) {
+        // TODO separate point types
+        Array.prototype.push.apply(points, snapshot.val().data);
+      });
+      */
+
+    }).finally(function() {
+      // Always execute this on both error and success
+      //vm.log = 'Starting Three JS scene';
+      // threeService.init();
+    });
+  };
+})
+
+
+/*-------------------------------------------
+THREE JS FUNCTIONS
+-------------------------------------------*/
+.service('threeService', function(fix, points, colors) {
+  return {
+    scene: new THREE.Scene(),
+    camera: undefined,
+    texture: undefined,
+    controls: undefined,
+    renderer: new THREE.WebGLRenderer(),
+    locGroup: new THREE.Group(),
+    hypoGroup: new THREE.Group(),
+    magGroup: new THREE.Group(),
+    
+    makeGrid () {
+            
+      var grid1 = new THREE.GridHelper(150, 1, colors.grid1, colors.grid2);
+      grid1.position.y = 0;
+      grid1.opacity = 0.6;
+      this.scene.add(grid1);
+
+      var grid2 = new THREE.GridHelper(500, 1, colors.grid1, colors.grid2);
+      grid2.rotation.x = Math.PI / 2;
+      grid2.opacity = 0.6;
+      // this.scene.add(grid2);
+    },
+
+    // TODO
+    // load a texture, set wrap mode to repeat
+    makeTexture () {
+      
+      // console.log('texture');
+      
+      var texture = new THREE.TextureLoader()
+      
+      texture.load(
+        'http://lorempixel.com/output/sports-q-c-640-480-9.jpg',
+        function ( texture ) {
+          // do something with the texture
+          var material = new THREE.MeshBasicMaterial( {
+            map: texture
+           });
+          
+          
+        },
+        // Function called when download progresses
+        function ( xhr ) {
+          console.log( (xhr.loaded / xhr.total * 100) + '% loaded' );
+        },
+        // Function called when download errors
+        function ( xhr ) {
+          console.log( 'An error happened' );
+        }
+      );      
+    },
+
+    makeSky () {
+      var geometry = new THREE.SphereGeometry(900, 2, 12);
+      var material = new THREE.MeshBasicMaterial({
+        // map: this.texture,
+        color: 0xffffff,
+        side: THREE.DoubleSide
+      });
+      var sphere = new THREE.Mesh(geometry, material);
+      this.scene.add(sphere);
+    },
+
+    makeDirectionalLight () {
+      var directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+      directionalLight.position.set(20, 10, 0);
+      directionalLight.rotation.y = 90;
+      directionalLight.castShadow = true;
+
+      //var shadowCamera = new THREE.CameraHelper( directionalLight.shadow.camera );
+
+      this.scene.add(directionalLight);
+      //scene.add( shadowCamera );
+    },
+
+    makeLight () {
+      var light = new THREE.AmbientLight(0x404040, 2); // soft white light
+      // light.castShadow = true;
+      this.scene.add(light);
+    },
+
+    makePointLight () {
+      var light = new THREE.PointLight(0x00ff00, 1, 100);
+      light.position.set(50, 50, 50);
+      // this.scene.add( light );
+    },
+
+    makeCamera () {
+      var t = this;
+      t.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 1, 1000);
+      t.camera.position.z = 12;
+      t.camera.position.y = 4;
+      t.camera.rotation.x = 16;
+
+      // Camera contrls
+      t.controls = new THREE.OrbitControls(t.camera, t.renderer.domElement);
+      t.controls.enableDamping = true;
+      t.controls.dampingFactor = 0.25;
+      t.controls.enableZoom = true;
+      
+
+    },
+
+    makeMagPoint ($x, $y, $z, $size=1, $color=0xffdd00) {
+      var size = $size;
+      var geometry = new THREE.SphereGeometry(size, 24, 24);
+      var material = new THREE.MeshLambertMaterial({
+        transparent: true,
+        opacity: 0.4,
+        // wireframe: true,
+        color: parseInt($color, 16)
+          //map: texture
+      });
+      var cube = new THREE.Mesh(geometry, material);
+
+      // cube.geometry.computeVertexNormals();
+
+      cube.castShadow = true;
+      //cube.receiveShadow = true;
+      cube.position.set($x, $y, $z);
+
+      this.magGroup.add(cube);
+      //this.renderFrame = 0;
+    },
+
+    makeHypo ($x, $y, $z, $size=1, $color=0x00ff00) {
+
+      var size = $size;
+      var geometry = new THREE.SphereGeometry(size, 16, 16);
+      var material = new THREE.MeshLambertMaterial({
+        transparent: true,
+        opacity: 1,
+        color: parseInt($color, 16)
+      });
+      var mesh = new THREE.Mesh(geometry, material);
+
+      mesh.castShadow = true;
+      //cube.receiveShadow = true;
+      mesh.position.set($x, $y, $z);
+      
+      this.hypoGroup.add(mesh);
+      this.renderFrame = 0;
+    },
+    
+    makeLoc ($x, $y, $z, $size=1, $color=0x00ff00) {
+
+      var size = $size
+      var geometry = new THREE.BoxGeometry(size, size, size);
+      var material = new THREE.MeshLambertMaterial({
+        color: parseInt($color, 16)
+      });
+      var point = new THREE.Mesh(geometry, material);      
+
+      point.castShadow = true;
+      //point.receiveShadow = true;
+      point.position.set($x, $y, $z);
+      
+      this.locGroup.add(point);      
+      
+    },
+    
+    makeText ($text, $lat, $lon, $depth, $fontSize) {
+      
+      
+      console.log($text, $lat, $lon, $depth, $fontSize);
+      
+      
+      var t = this,
+          depth = $depth || .5,
+          fontSize = $fontSize || .15
+      ;
+      
+      var loader = new THREE.FontLoader();
+      loader.load('https://codepen.io/afalchi82/pen/qajLNV.js', function (font) {
+
+        var textGeometry = new THREE.TextGeometry( $text, { 
+          font: font,
+          size: fontSize,
+          height: .01,
+          curveSegments: 12,
+          bevelThickness: 1,
+          bevelSize: 1,
+          bevelEnabled: false
+        });
+
+        var textMaterial = new THREE.MeshPhongMaterial( 
+          { color: 0xffffff, specular: 0xffffff }
+        );
+
+        var mesh = new THREE.Mesh( textGeometry, textMaterial );
+        // mesh.position.set($lat, $depth, $lon);
+        mesh.position.set($lat, .5, $lon);
+        
+        t.locGroup.add(mesh);
+     
+      });      
+     
+      
+    },
+
+    makePlane () {
+      
+      var t = this,
+          texture = new THREE.TextureLoader(),
+          textureMaterial
+      ;      
+      
+      texture.load(
+        'http://lorempixel.com/output/sports-q-c-640-480-9.jpg',
+        function ( texture ) {
+          // do something with the texture
+          textureMaterial = new THREE.MeshBasicMaterial( {
+            map: texture
+          });
+          
+          init();
+          
+        },
+        // Function called when download progresses
+        function ( xhr ) {
+          console.log( (xhr.loaded / xhr.total * 100) + '% loaded' );
+        },
+        // Function called when download errors
+        function ( xhr ) {
+          console.log( 'An error happened' );
+        }
+      );
+      
+      function init () {
+        console.log('Plane init');
+        
+        var geometry = new THREE.PlaneGeometry(50, 60, 32);
+        var plane = new THREE.Mesh(geometry, textureMaterial);
+
+        plane.castShadow = true;
+        plane.receiveShadow = true;
+        plane.rotation.x = 90;
+        plane.position.set(10, -20, -10);
+
+        t.scene.add(plane);
+      }
+
+      
+    },
+
+    clearScene: function() {
+      var t = this;
+      
+      // console.log(this);
+      for (let i=t.hypoGroup.children.length-1; i>=0; i--) {
+        t.hypoGroup.remove(t.hypoGroup.children[i]);
+      }
+      
+      for (let i=t.magGroup.children.length-1; i>=0; i--) {
+        t.magGroup.remove(t.magGroup.children[i]);
+      }    
+    },
+    
+    hypoSize ($scale) {
+      var t = this;
+      for (let i=0; i<t.hypoGroup.children.length; i++) {
+        t.hypoGroup.children[i].scale.x = $scale;
+        t.hypoGroup.children[i].scale.y = $scale;
+        t.hypoGroup.children[i].scale.z = $scale;
+      }
+      
+      t.hypoGroup.children.forEach(function () {
+        
+      });
+    },
+    
+    magSize ($scale) {
+      var t = this;
+      for (let i=0; i<t.magGroup.children.length; i++) {
+        t.magGroup.children[i].scale.x = $scale;
+        t.magGroup.children[i].scale.y = $scale;
+        t.magGroup.children[i].scale.z = $scale;
+      }
+    },
+    
+    renderFrame: 0,
+    startTime: 0,
+
+    render () {
+      var t = this;
+      
+      this.renderFrame++;      
+      var i = Math.floor(this.renderFrame / 100);
+       
+      // Sequence animation
+      /*
+      if (t.hypoGroup.children.length > 0 && i<t.hypoGroup.children.length) {        
+        var s = 0.1;        
+        t.hypoGroup.children[i].material.opacity += s;
+        if ( i > 0) {
+          t.hypoGroup.children[i-1].material.opacity -= s*2;
+        }
+      }
+      */
+      
+      /*
+      if(this.modifyGroup) {
+        console.log(77);
+        var i=0;
+        setTimeout(function () {
+          t.hypoGroup.children[i].visible = false;
+        }, 1000);
+        
+        
+        for (var i=0; i<t.hypoGroup.children.length; i++) {
+          t.hypoGroup.children[i].scale.x += .1;
+          t.hypoGroup.children[i].scale.y += .1;
+          t.hypoGroup.children[i].scale.z += .1;
+        }
+        
+      }
+      */
+      
+
+      // http://stackoverflow.com/questions/6065169/requestanimationframe-with-this-keyword
+      requestAnimationFrame(this.render.bind(this));
+      // t.renderer.setSize(window.innerWidth, window.innerHeight);
+      t.renderer.render(t.scene, t.camera);
+    },
+
+    init () {
+      
+      var renderer = this.renderer;
+
+      // this.makeSky();
+      this.makeGrid();
+      // makeCube();
+      //this.makePlane();
+      this.makeCamera();
+      this.makeDirectionalLight();
+      //makeLight();
+      //makePointLight();      
+      
+      this.scene.add(this.locGroup);
+      this.scene.add(this.magGroup);
+      this.scene.add(this.hypoGroup);
+      // this.scene.background = new THREE.Color(0xff0000);
+
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.setClearColor(colors.bg);
+      document.body.appendChild(renderer.domElement);
+
+      this.render();
+
+    }
+
+  };
+})
+
+
+/*-------------------------------------------
+FIX VALUES
+-------------------------------------------*/
+.service('fix', function() {
+  return {
+    n: 12,
+    fn (val) {
+      return val * this.n;
+    },
+    lat (val) {
+      return ((val - 43) * this.n) * (-1); // (val - 41.8) * this.n;
+    },
+    lon: function(val) {
+      var newVal = ((val - 13)) * this.n;
+      // console.log(val, newVal );
+      return newVal;
+    },
+    depth: function(val) {
+      return val * (-1) / 8000;
+    },
+    mag: function(val) {
+      var mag = Math.pow((Math.pow(10, val)), (3 / 2)); // val;
+      //console.log(mag)
+      return mag / Math.pow(10, 7);
+    }
+  };
+})
+
+
+.constant('colors', {
+  bg: 0xffffff,
+  grid1: 0x999999,
+  grid2: 0xeeeeee
+})
+
+
+/*-------------------------------------------
+DATE SERVICE
+-------------------------------------------*/
+.service('dateService', function(){
+  
+})
+
+;
+
+// http://webservices.rm.ingv.it/fdsnws/event/1/
+  </script>
+
+  
+  
+
+</body>
+</html>
+ 
